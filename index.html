@@ -415,4 +415,769 @@
     My orders
   </button>
   <button class="navitem" data-tab="category">
-    <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="ro
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5 12 3l9 6.5"/><path d="M5 9.5V21h14V9.5"/><path d="M9 21v-6h6v6"/></svg>
+    Category
+  </button>
+  <button class="navitem" data-tab="productview">
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-4.5-4.5L9 18"/></svg>
+    Product
+  </button>
+  <button class="navitem" data-tab="profile">
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/></svg>
+    Profile
+  </button>
+</div>
+
+<div class="modal-overlay" id="orderModal">
+  <div class="modal-sheet">
+    <div class="modal-head">
+      <h3 id="orderModalTitle">Order this product</h3>
+      <button class="modal-close" id="orderModalClose" aria-label="Close">✕</button>
+    </div>
+    <div id="orderModalBody"></div>
+  </div>
+</div>
+
+<div id="printarea" style="display:none;"></div>
+
+<script>
+/* ================================================================
+   KITQUE — CONFIG
+   Fill these in once your Supabase project exists, then re-upload
+   this file (or host it) — see README for step-by-step setup.
+================================================================= */
+const SUPABASE_URL = "https://dnkcfluxdaefdzzxiwyi.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRua2NmbHV4ZGFlZmR6enhpd3lpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU0NjYzMDEsImV4cCI6MjEwMTA0MjMwMX0.WuPtSaXs9s8j1NjoIysUMNG89KSZn94cP45fm5qiZ-4";
+
+const isConfigured = !SUPABASE_URL.startsWith("PASTE_") && !SUPABASE_ANON_KEY.startsWith("PASTE_");
+
+if(!isConfigured){
+  document.getElementById('configBanner').style.display='block';
+  document.getElementById('configBanner').innerHTML =
+    "<strong>Backend not connected yet.</strong> Open kitque.html in a text editor and paste your Supabase project URL and anon key at the top of the &lt;script&gt; section. See README-SETUP.md for the exact steps.";
+}
+
+/* ---------------- REST helpers (no external libraries) ---------------- */
+let session = null; // { access_token, user }
+
+function authHeaders(){
+  const h = { "apikey": SUPABASE_ANON_KEY, "Content-Type":"application/json" };
+  h["Authorization"] = "Bearer " + (session ? session.access_token : SUPABASE_ANON_KEY);
+  return h;
+}
+
+async function pgFetch(path, opts={}){
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    ...opts,
+    headers: { ...authHeaders(), ...(opts.headers||{}) }
+  });
+  if(!res.ok){ const t = await res.text(); throw new Error(t || res.statusText); }
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
+
+async function rpcFetch(fn, body){
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+    method:"POST", headers: authHeaders(), body: JSON.stringify(body)
+  });
+  if(!res.ok){ const t = await res.text(); throw new Error(t || res.statusText); }
+  return res.json();
+}
+
+async function authFetch(path, body){
+  const res = await fetch(`${SUPABASE_URL}/auth/v1/${path}`, {
+    method:"POST",
+    headers:{ "apikey": SUPABASE_ANON_KEY, "Content-Type":"application/json" },
+    body: JSON.stringify(body)
+  });
+  const data = await res.json();
+  if(!res.ok) throw new Error(data.error_description || data.msg || data.error || "Something went wrong");
+  return data;
+}
+
+/* ---------------- toast ---------------- */
+function toast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(()=>t.classList.remove('show'), 2400);
+}
+
+/* ---------------- navigation ---------------- */
+const tabs = ["products","orders","category","productview","profile"];
+function showTab(tab){
+  tabs.forEach(t=>{
+    document.getElementById('view-'+t).classList.toggle('active', t===tab);
+  });
+  document.querySelectorAll('.navitem').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
+  const subs = {products:"everything for home", orders:"track & manage", category:"browse by room", productview:"", profile:"your account"};
+  document.getElementById('topbarSub').textContent = subs[tab] || "";
+  if(tab==="orders") renderOrdersTab();
+  if(tab==="profile") renderProfileTab();
+  if(tab==="category") renderCategoryTab();
+  document.getElementById('pvActionBar').style.display = (tab==="productview" && currentProduct) ? 'flex' : 'none';
+  window.scrollTo(0,0);
+}
+document.querySelectorAll('.navitem').forEach(b=>{
+  b.addEventListener('click', ()=>showTab(b.dataset.tab));
+});
+document.getElementById('shareBtn').addEventListener('click', shareProduct);
+document.getElementById('orderBtn').addEventListener('click', ()=>{
+  if(currentProduct && currentProduct.has_sizes && Array.isArray(currentProduct.sizes) && currentProduct.sizes.length && !selectedSize){
+    toast("Please select a size first.");
+    return;
+  }
+  showOrderForm();
+});
+
+/* ---------------- state ---------------- */
+let allProducts = [];
+let allCategories = [];
+let activeFilter = "all";
+let searchTerm = "";
+let currentProduct = null;
+let selectedQty = 1;
+let selectedSize = null;
+
+/* ---------------- site branding ---------------- */
+async function loadSiteLogo(){
+  // No logo/branding graphic shows by default — a 16:4 slot is reserved
+  // in the header and only becomes visible once an admin sets a
+  // `logo_url` in the `site_settings` table (id=1).
+  if(!isConfigured) return;
+  try{
+    const rows = await pgFetch("site_settings?select=logo_url&id=eq.1");
+    const logoUrl = rows && rows[0] && rows[0].logo_url;
+    if(logoUrl){
+      const slot = document.getElementById('brandMark');
+      slot.innerHTML = `<img src="${escapeHtml(logoUrl)}" alt="Kitque logo">`;
+      slot.classList.add('has-logo');
+    }
+  }catch(e){ /* site_settings table not created yet — slot stays empty */ }
+}
+
+/* ---------------- shared-link deep open ---------------- */
+function openSharedProductFromUrl(){
+  const id = new URLSearchParams(window.location.search).get('product');
+  if(id) openProduct(id);
+}
+
+/* ---------------- data loading ---------------- */
+async function loadCategories(){
+  if(!isConfigured) return;
+  try{
+    allCategories = await pgFetch("categories?select=*&order=name.asc");
+  }catch(e){ console.error(e); allCategories = []; }
+}
+
+async function loadProducts(){
+  if(!isConfigured) return;
+  try{
+    allProducts = await pgFetch("products?select=*&order=created_at.desc");
+  }catch(e){ console.error(e); allProducts = []; }
+  renderProductGrid();
+}
+
+/* ---------------- product grid + filters ---------------- */
+function matchesFilter(p){
+  if(activeFilter==="bestseller") return !!p.is_bestseller;
+  if(activeFilter==="under500") return p.price < 500;
+  if(activeFilter==="500to2000") return p.price >= 500 && p.price <= 2000;
+  if(activeFilter==="over2000") return p.price > 2000;
+  return true;
+}
+
+function renderProductGrid(){
+  const grid = document.getElementById('productGrid');
+  let items = allProducts.filter(matchesFilter);
+  if(searchTerm.trim()){
+    const q = searchTerm.trim().toLowerCase();
+    items = items.filter(p => p.title.toLowerCase().includes(q) || (p.description||"").toLowerCase().includes(q));
+  }
+  if(!isConfigured){
+    grid.innerHTML = "";
+    return;
+  }
+  if(items.length===0){
+    grid.innerHTML = "";
+    grid.parentElement.querySelectorAll('.empty').forEach(e=>e.remove());
+    const empty = document.createElement('div');
+    empty.className = "empty";
+    empty.innerHTML = allProducts.length===0
+      ? `<div class="glyph">🏡</div><h3>No products yet</h3><p>Kitque is warming up — check back once sellers start adding products.</p>`
+      : `<div class="glyph">🔍</div><h3>Nothing matches</h3><p>Try a different search term or filter.</p>`;
+    grid.after(empty);
+    return;
+  }
+  document.querySelectorAll('#view-products .empty').forEach(e=>e.remove());
+  grid.innerHTML = items.map(productCardHtml).join('');
+}
+
+document.getElementById('searchInput').addEventListener('input', e=>{
+  searchTerm = e.target.value; renderProductGrid();
+});
+document.querySelectorAll('.filters .chip').forEach(chip=>{
+  chip.addEventListener('click', ()=>{
+    document.querySelectorAll('.filters .chip').forEach(c=>c.classList.remove('active'));
+    chip.classList.add('active');
+    activeFilter = chip.dataset.filter;
+    renderProductGrid();
+  });
+});
+
+function productCardHtml(p){
+  const off = p.mrp && p.mrp>p.price ? Math.round((1-p.price/p.mrp)*100) : 0;
+  return `
+    <div class="pcard" onclick="openProduct('${p.id}')">
+      <div class="thumb">
+        ${p.is_bestseller ? '<div class="best">Best seller</div>' : ''}
+        ${productImages(p)[0] ? `<img src="${escapeHtml(productImages(p)[0])}" alt="">` : `<span style="font-size:30px;">🏠</span>`}
+      </div>
+      <div class="body">
+        <div class="title">${escapeHtml(p.title)}</div>
+        <div class="price">
+          <span>₹${Number(p.price).toLocaleString('en-IN')}</span>
+          ${off>0 ? `<span class="price-mrp-sm">₹${Number(p.mrp).toLocaleString('en-IN')}</span>` : ''}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function escapeHtml(s){
+  return String(s||"").replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+
+/* ---------------- categories tab ---------------- */
+function renderCategoryTab(){
+  const wrap = document.getElementById('catGrid');
+  if(!isConfigured){ wrap.innerHTML = ""; return; }
+  const withCounts = allCategories.map(c=>{
+    const count = allProducts.filter(p=>p.category_id===c.id).length;
+    return {...c, count};
+  }).filter(c=>c.count>0);
+
+  if(withCounts.length===0){
+    wrap.innerHTML = "";
+    const empty = document.createElement('div');
+    empty.className = "empty";
+    empty.innerHTML = `<div class="glyph">📦</div><h3>No categories live yet</h3><p>Categories appear here as soon as they have products in them.</p>`;
+    wrap.after(empty);
+    return;
+  }
+  document.querySelectorAll('#view-category .empty').forEach(e=>e.remove());
+  wrap.innerHTML = withCounts.map(c=>`
+    <div class="catcard" onclick="openCategory('${c.id}')">
+      <div class="icon">${c.icon||'🏷️'}</div>
+      <div class="name">${escapeHtml(c.name)}</div>
+      <div class="count">${c.count} product${c.count>1?'s':''}</div>
+    </div>
+  `).join('');
+}
+function openCategory(id){
+  activeFilter = "all"; searchTerm="";
+  document.getElementById('searchInput').value = "";
+  document.querySelectorAll('.filters .chip').forEach(c=>c.classList.remove('active'));
+  document.querySelector('.filters .chip[data-filter="all"]').classList.add('active');
+  const items = allProducts.filter(p=>p.category_id===id);
+  showTab('products');
+  const grid = document.getElementById('productGrid');
+  document.querySelectorAll('#view-products .empty').forEach(e=>e.remove());
+  if(items.length===0){ renderProductGrid(); return; }
+  grid.innerHTML = items.map(productCardHtml).join('');
+}
+
+/* ---------------- product view ---------------- */
+function openProduct(id){
+  currentProduct = allProducts.find(p=>p.id===id);
+  if(!currentProduct) return;
+  renderProductView();
+  showTab('productview');
+}
+
+function productImages(p){
+  // Supports a seller-supplied `images` array (4-5 photos) with graceful
+  // fallback to the legacy single `image_url` column.
+  if(Array.isArray(p.images) && p.images.length) return p.images;
+  if(p.image_url) return [p.image_url];
+  return [];
+}
+
+function renderProductView(){
+  const p = currentProduct;
+  const pv = document.getElementById('pvContent');
+  if(!p){ pv.innerHTML = `<div class="empty"><div class="glyph">🛒</div><h3>No product selected</h3><p>Pick a product from All Products to see it here.</p></div>`; return; }
+  selectedQty = 1;
+  selectedSize = null;
+  const images = productImages(p);
+  const gallery = images.length ? `
+    <div class="pv-gallery">
+      <div class="pv-slider" id="pvSlider">
+        ${images.map(src=>`<div class="slide"><img src="${escapeHtml(src)}" alt="${escapeHtml(p.title)}"></div>`).join('')}
+      </div>
+      ${images.length>1 ? `<div class="pv-counter" id="pvCounter">1/${images.length}</div>` : ''}
+      ${images.length>1 ? `<div class="pv-dots" id="pvDots">${images.map((_,i)=>`<div class="dot${i===0?' active':''}"></div>`).join('')}</div>` : ''}
+    </div>
+  ` : `<div class="pv-image"><div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:60px;">🏠</div></div>`;
+
+  const mrp = Number(p.mrp)||0, price = Number(p.price)||0;
+  const off = mrp>price ? Math.round((1-price/mrp)*100) : 0;
+  const sizes = Array.isArray(p.sizes) ? p.sizes : [];
+
+  pv.innerHTML = `
+    ${gallery}
+    <h1 class="pv-title">${escapeHtml(p.title)}</h1>
+    <div class="price-row">
+      <span class="price-now">₹${price.toLocaleString('en-IN')}</span>
+      ${off>0 ? `<span class="price-mrp">₹${mrp.toLocaleString('en-IN')}</span><span class="price-off">${off}% off</span>` : ''}
+    </div>
+    <div class="pv-meta">
+      ${p.is_bestseller ? '<div class="tag">⭐ Best seller</div>' : ''}
+      <div class="tag">${p.stock>0 ? 'In stock' : 'Made to order'}</div>
+    </div>
+    ${p.has_sizes && sizes.length ? `
+      <div class="size-label">Select size</div>
+      <div class="size-row" id="sizeRow">
+        ${sizes.map(s=>`<button type="button" class="size-chip" data-size="${escapeHtml(s)}">${escapeHtml(s)}</button>`).join('')}
+      </div>
+    ` : ''}
+    <div class="qty-stepper">
+      <span class="lbl">Quantity</span>
+      <button type="button" id="qtyMinus">−</button>
+      <div class="qn" id="qtyVal">1</div>
+      <button type="button" id="qtyPlus">+</button>
+      <div class="total-row" id="pvTotal"></div>
+    </div>
+    <div class="pv-desc">${escapeHtml(p.description || "No description provided for this product yet.")}</div>
+    <div class="pv-spacer"></div>
+  `;
+
+  if(images.length>1) initGallery(images.length);
+
+  const qtyMinus=document.getElementById('qtyMinus'), qtyPlus=document.getElementById('qtyPlus'), qtyVal=document.getElementById('qtyVal');
+  qtyMinus.addEventListener('click', ()=>{
+    if(selectedQty>1){ selectedQty--; qtyVal.textContent=selectedQty; updateTotalDisplay(); }
+  });
+  qtyPlus.addEventListener('click', ()=>{
+    const max = p.stock>0 ? p.stock : 99;
+    if(selectedQty<max){ selectedQty++; qtyVal.textContent=selectedQty; updateTotalDisplay(); }
+    else toast("That's all the stock we have right now.");
+  });
+  const sizeRow = document.getElementById('sizeRow');
+  if(sizeRow){
+    sizeRow.querySelectorAll('.size-chip').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        sizeRow.querySelectorAll('.size-chip').forEach(b=>b.classList.remove('active'));
+        btn.classList.add('active');
+        selectedSize = btn.dataset.size;
+      });
+    });
+  }
+  updateTotalDisplay();
+}
+
+function updateTotalDisplay(){
+  const p = currentProduct;
+  if(!p) return;
+  const el = document.getElementById('pvTotal');
+  if(el) el.textContent = `Total: ₹${(Number(p.price)*selectedQty).toLocaleString('en-IN')}`;
+}
+
+function initGallery(count){
+  const slider = document.getElementById('pvSlider');
+  if(!slider) return;
+  slider.addEventListener('scroll', ()=>{
+    const idx = Math.round(slider.scrollLeft / slider.clientWidth);
+    document.querySelectorAll('#pvDots .dot').forEach((d,i)=>d.classList.toggle('active', i===idx));
+    const counter = document.getElementById('pvCounter');
+    if(counter) counter.textContent = `${idx+1}/${count}`;
+  }, {passive:true});
+}
+
+/* ---------------- sticky action bar (share + order) ---------------- */
+function renderActionBar(){
+  const bar = document.getElementById('pvActionBar');
+  if(!bar) return;
+  bar.style.display = currentProduct ? 'flex' : 'none';
+}
+
+async function shareProduct(){
+  if(!currentProduct) return;
+  const url = new URL(window.location.href);
+  url.search = ''; url.hash = '';
+  url.searchParams.set('product', currentProduct.id);
+  const shareData = {
+    title: `${currentProduct.title} · Kitque`,
+    text: `Check out ${currentProduct.title} on Kitque — ₹${Number(currentProduct.price).toLocaleString('en-IN')}`,
+    url: url.toString()
+  };
+  try{
+    if(navigator.share){ await navigator.share(shareData); }
+    else{ await navigator.clipboard.writeText(shareData.url); toast("Product link copied!"); }
+  }catch(e){ /* user cancelled share sheet — no-op */ }
+}
+
+function showOrderForm(){
+  const modal = document.getElementById('orderModal');
+  document.getElementById('orderModalTitle').textContent = "Order this product";
+  document.getElementById('orderModalBody').innerHTML = `
+    <div class="form-wrap" style="margin-top:0;">
+      <div class="cod-note">💵 Cash on delivery only — pay when your order arrives.</div>
+      <div class="kv"><span>Product</span><span>${escapeHtml(currentProduct.title)}</span></div>
+      ${currentProduct.has_sizes && selectedSize ? `<div class="kv"><span>Size</span><span>${escapeHtml(selectedSize)}</span></div>` : ''}
+      <div class="kv"><span>Quantity</span><span>${selectedQty}</span></div>
+      <div class="kv"><span>Total amount</span><span>₹${(Number(currentProduct.price)*selectedQty).toLocaleString('en-IN')}</span></div>
+      <div class="field" style="margin-top:12px;"><label>Full name</label><input id="f_name" placeholder="Your name"></div>
+      <div class="field-row">
+        <div class="field"><label>Mobile number</label><input id="f_mobile" placeholder="10-digit number" inputmode="numeric"></div>
+        <div class="field"><label>Email (optional)</label><input id="f_email" placeholder="you@email.com"></div>
+      </div>
+      <div class="field"><label>Address</label><textarea id="f_address" rows="2" placeholder="House no., street, landmark"></textarea></div>
+      <div class="field-row">
+        <div class="field"><label>State</label><input id="f_state" placeholder="State"></div>
+        <div class="field"><label>District</label><input id="f_district" placeholder="District"></div>
+      </div>
+      <div class="field"><label>Village / town</label><input id="f_village" placeholder="Village or town"></div>
+      <div id="formError" class="errline" style="display:none;"></div>
+      <button class="btn btn-primary" id="placeOrderBtn">Place order</button>
+    </div>
+  `;
+  document.getElementById('placeOrderBtn').addEventListener('click', placeOrder);
+  modal.classList.add('open');
+}
+
+function closeOrderModal(){
+  document.getElementById('orderModal').classList.remove('open');
+}
+document.getElementById('orderModalClose').addEventListener('click', closeOrderModal);
+document.getElementById('orderModal').addEventListener('click', (e)=>{
+  if(e.target.id === 'orderModal') closeOrderModal();
+});
+
+function genOrderCode(){
+  return "KTQ-" + Math.floor(10000 + Math.random()*89999);
+}
+
+async function placeOrder(){
+  const btn = document.getElementById('placeOrderBtn');
+  const name = document.getElementById('f_name').value.trim();
+  const mobile = document.getElementById('f_mobile').value.trim();
+  const email = document.getElementById('f_email').value.trim();
+  const address = document.getElementById('f_address').value.trim();
+  const state = document.getElementById('f_state').value.trim();
+  const district = document.getElementById('f_district').value.trim();
+  const village = document.getElementById('f_village').value.trim();
+  const errEl = document.getElementById('formError');
+
+  if(!name || !mobile || !address || !state || !district || !village || !/^\d{10}$/.test(mobile)){
+    errEl.style.display='block';
+    errEl.textContent = !/^\d{10}$/.test(mobile) && mobile ? "Enter a valid 10-digit mobile number." : "Please fill in every required field.";
+    return;
+  }
+  errEl.style.display='none';
+
+  const days = 5 + Math.floor(Math.random()*6); // 5-10 days
+  const expected = new Date(); expected.setDate(expected.getDate()+days);
+  const order = {
+    order_code: genOrderCode(),
+    product_id: currentProduct.id,
+    product_title: currentProduct.title,
+    price: currentProduct.price,
+    quantity: selectedQty,
+    size: currentProduct.has_sizes ? selectedSize : null,
+    total_price: Number(currentProduct.price) * selectedQty,
+    buyer_name: name, mobile, email: email || null,
+    address, state, district, village,
+    status: "Confirmed",
+    expected_delivery: expected.toISOString().slice(0,10),
+    user_id: session ? session.user.id : null
+  };
+
+  btn.disabled = true; btn.textContent = "Placing order…";
+
+  try{
+    // Not using the insert response here: guests (user_id = null) can't
+    // pass the orders table's own SELECT policy (auth.uid() = user_id),
+    // so return=representation comes back empty for them even though the
+    // insert succeeded. Everything the confirmation card needs is already
+    // in `order`, so render straight from that.
+    await pgFetch("orders", {
+      method:"POST",
+      headers:{ "Prefer":"return=minimal" },
+      body: JSON.stringify(order)
+    });
+    document.getElementById('orderModalTitle').textContent = "Order confirmed";
+    renderOrderCard(order, document.getElementById('orderModalBody'));
+    toast("Order placed! Cash on delivery.");
+  }catch(e){
+    console.error(e);
+    btn.disabled = false; btn.textContent = "Place order";
+    // Surface the real backend error (e.g. an RLS policy or a check
+    // constraint rejecting the row) instead of a generic message, so
+    // it's actually possible to diagnose from the Supabase side.
+    errEl.style.display = 'block';
+    errEl.textContent = "Couldn't place the order: " + e.message;
+  }
+}
+
+function renderOrderCard(o, targetEl){
+  const wrap = targetEl || document.getElementById('orderModalBody');
+  wrap.innerHTML = `
+    <div class="ordercard" id="orderCardPrintable">
+      <div class="ok">✅ Order confirmed</div>
+      <div class="code">${o.order_code}</div>
+      <div class="kv"><span>Product</span><span>${escapeHtml(o.product_title)}</span></div>
+      ${o.size ? `<div class="kv"><span>Size</span><span>${escapeHtml(o.size)}</span></div>` : ''}
+      <div class="kv"><span>Quantity</span><span>${o.quantity||1}</span></div>
+      <div class="kv"><span>Total amount</span><span>₹${Number(o.total_price||o.price).toLocaleString('en-IN')}</span></div>
+      <div class="kv"><span>Name</span><span>${escapeHtml(o.buyer_name)}</span></div>
+      <div class="kv"><span>Mobile</span><span>${escapeHtml(o.mobile)}</span></div>
+      <div class="kv"><span>Address</span><span>${escapeHtml(o.address)}, ${escapeHtml(o.village)}, ${escapeHtml(o.district)}, ${escapeHtml(o.state)}</span></div>
+      <div class="kv"><span>Payment</span><span>Cash on delivery</span></div>
+      <div class="kv"><span>Expected delivery</span><span>${o.expected_delivery}</span></div>
+      <button class="btn btn-ghost" style="margin-top:14px;" onclick="downloadOrderCard('${o.order_code}')">Download order card (PDF)</button>
+      ${!session ? `<div class="track-note">📍 Want to track this order later? <a href="#" onclick="showTab('profile');return false;" style="color:var(--accent-dark);font-weight:700;">Sign up</a> so it's saved to your account — or track anytime with your mobile number and order ID under My Orders.</div>` : ''}
+      <button class="btn btn-primary" style="margin-top:12px;" onclick="closeOrderModal()">Done</button>
+    </div>
+  `;
+}
+
+function downloadOrderCard(code){
+  const card = document.getElementById('orderCardPrintable');
+  if(!card){ toast("Nothing to download yet."); return; }
+
+  const fallbackPrint = ()=>{
+    document.getElementById('printarea').innerHTML = card.outerHTML;
+    window.print();
+  };
+
+  if(!window.html2pdf){ fallbackPrint(); return; }
+
+  // Capture the card that's actually on screen (so fonts/CSS are already
+  // rendered) — just hide the action buttons for a moment so they don't
+  // appear in the PDF.
+  const buttons = card.querySelectorAll('button');
+  const prevDisplay = [];
+  buttons.forEach(b=>{ prevDisplay.push(b.style.display); b.style.display = 'none'; });
+
+  const opt = {
+    margin: 10,
+    filename: `${code}-kitque-order.pdf`,
+    image: { type: 'jpeg', quality: 0.98 },
+    html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', windowWidth: document.documentElement.scrollWidth },
+    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+  };
+
+  html2pdf().set(opt).from(card).save()
+    .then(()=>{
+      buttons.forEach((b,i)=>{ b.style.display = prevDisplay[i]; });
+    })
+    .catch(err=>{
+      console.error(err);
+      buttons.forEach((b,i)=>{ b.style.display = prevDisplay[i]; });
+      toast("Couldn't generate the PDF file — opening print instead.");
+      fallbackPrint();
+    });
+}
+
+/* ---------------- my orders tab ---------------- */
+let myOrders = [];
+
+async function renderOrdersTab(){
+  const wrap = document.getElementById('ordersContent');
+  if(!isConfigured){ wrap.innerHTML = ""; return; }
+
+  if(session){
+    try{
+      myOrders = await pgFetch(`orders?select=*&user_id=eq.${session.user.id}&order=created_at.desc`);
+    }catch(e){ myOrders = []; }
+    wrap.innerHTML = renderOrderList(myOrders, true);
+    attachCancelHandlers();
+    return;
+  }
+
+  wrap.innerHTML = `
+    <div class="lookup-box">
+      <h3>Track a guest order</h3>
+      <div class="field"><label>Order ID</label><input id="lk_code" placeholder="KTQ-XXXXX"></div>
+      <div class="field"><label>Mobile number used at checkout</label><input id="lk_mobile" placeholder="10-digit number" inputmode="numeric"></div>
+      <button class="btn btn-primary" id="lookupBtn">Find my order</button>
+      <div style="text-align:center;font-size:12px;color:var(--ink-soft);margin-top:12px;">or <a href="#" onclick="showTab('profile');return false;" style="color:var(--brand-dark);font-weight:700;">sign up</a> to see every order automatically</div>
+    </div>
+    <div id="lookupResult"></div>
+  `;
+  document.getElementById('lookupBtn').addEventListener('click', async ()=>{
+    const code = document.getElementById('lk_code').value.trim();
+    const mobile = document.getElementById('lk_mobile').value.trim();
+    if(!code || !mobile){ toast("Enter both order ID and mobile number."); return; }
+    try{
+      const rows = await rpcFetch("get_order_by_code", {p_order_code: code, p_mobile: mobile});
+      const resultEl = document.getElementById('lookupResult');
+      if(!rows || rows.length===0){
+        resultEl.innerHTML = `<div class="empty"><div class="glyph">🔎</div><h3>No order found</h3><p>Double-check the order ID and mobile number.</p></div>`;
+        return;
+      }
+      myOrders = rows;
+      resultEl.innerHTML = renderOrderList(rows, true);
+      attachCancelHandlers();
+    }catch(e){ console.error(e); toast("Something went wrong. Try again."); }
+  });
+}
+
+function renderOrderList(orders, cancellable){
+  if(!orders || orders.length===0){
+    return `<div class="empty"><div class="glyph">📭</div><h3>No orders yet</h3><p>Orders you place will show up here.</p></div>`;
+  }
+  return orders.map(o=>{
+    const placed = new Date(o.created_at);
+    const withinWindow = (Date.now() - placed.getTime()) < 3*24*60*60*1000;
+    const canCancel = cancellable && o.status !== "Cancelled" && o.status !== "Delivered" && withinWindow;
+    return `
+    <div class="ordertile">
+      <div class="top">
+        <div><div class="code">${o.order_code}</div><div class="meta">Placed ${placed.toLocaleDateString()}</div></div>
+        <div class="status ${o.status}">${o.status}</div>
+      </div>
+      <div class="pname">${escapeHtml(o.product_title)}${o.size?` · Size ${escapeHtml(o.size)}`:''}${o.quantity>1?` · Qty ${o.quantity}`:''} · ₹${Number(o.total_price||o.price).toLocaleString('en-IN')}</div>
+      <div class="meta">Expected delivery: ${o.expected_delivery || '—'}</div>
+      ${canCancel ? `<div class="cancel-row"><button class="btn btn-danger" data-code="${o.order_code}" data-mobile="${o.mobile}">Cancel order</button></div>` : ''}
+      ${!canCancel && o.status!=="Cancelled" && o.status!=="Delivered" ? `<div class="meta" style="margin-top:8px;">Cancellation window closed (orders can only be cancelled within 3 days of placing).</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function attachCancelHandlers(){
+  document.querySelectorAll('.cancel-row button').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const code = btn.dataset.code, mobile = btn.dataset.mobile;
+      try{
+        const result = await rpcFetch("cancel_order", {p_order_code: code, p_mobile: mobile});
+        if(result === "cancelled"){ toast("Order cancelled."); renderOrdersTab(); }
+        else if(result === "window_closed"){ toast("Too late — this order is past the 3-day cancellation window."); }
+        else if(result === "already_cancelled"){ toast("This order is already cancelled."); }
+        else { toast("Order not found."); }
+      }catch(e){ console.error(e); toast("Couldn't cancel right now. Try again."); }
+    });
+  });
+}
+
+/* ---------------- profile / auth ---------------- */
+function renderProfileTab(){
+  const wrap = document.getElementById('profileContent');
+  if(!isConfigured){ wrap.innerHTML = ""; return; }
+  if(session){
+    const email = session.user.email || "";
+    const initials = (email[0]||"H").toUpperCase();
+    wrap.innerHTML = `
+      <div class="authcard">
+        <div class="profile-head">
+          <div class="avatar">${initials}</div>
+          <div><div class="pname">${escapeHtml(email)}</div><div class="pmob">Signed in to Kitque</div></div>
+        </div>
+        <div class="stat-row">
+          <div class="stat"><div class="n">${myOrders.length}</div><div class="l">Total orders</div></div>
+          <div class="stat"><div class="n">${myOrders.filter(o=>o.status==="Delivered").length}</div><div class="l">Delivered</div></div>
+        </div>
+        <button class="btn btn-ghost" id="logoutBtn">Log out</button>
+      </div>
+    `;
+    document.getElementById('logoutBtn').addEventListener('click', ()=>{
+      session = null; toast("Logged out."); renderProfileTab();
+    });
+  } else {
+    wrap.innerHTML = `
+      <div class="authcard">
+        <h3 style="font-size:16px;margin-bottom:14px;">Log in or sign up</h3>
+        <div id="authFormWrap"></div>
+      </div>
+    `;
+    switchAuthTab('login');
+  }
+}
+
+let authTab = "login"; // "login" | "signup"
+
+function switchAuthTab(which){
+  authTab = which;
+  renderAuthStage();
+}
+
+function renderAuthStage(){
+  const wrap = document.getElementById('authFormWrap');
+  if(authTab === "login"){
+    wrap.innerHTML = `
+      <div class="field"><label>Email</label><input id="a_email" placeholder="you@email.com"></div>
+      <div class="field"><label>Password</label><input id="a_password" type="password" placeholder="Your password"></div>
+      <div id="authErr" class="errline" style="display:none;"></div>
+      <button class="btn btn-primary" id="authSubmit">Log in</button>
+      <div style="text-align:center;font-size:12px;color:var(--ink-soft);margin-top:12px;">New to Kitque? <a href="#" id="goSignup" style="color:var(--brand-dark);font-weight:700;">Create an account</a></div>
+    `;
+    document.getElementById('authSubmit').addEventListener('click', doLogin);
+    document.getElementById('goSignup').addEventListener('click', (e)=>{ e.preventDefault(); authTab='signup'; renderAuthStage(); });
+  } else if(authTab === "signup"){
+    wrap.innerHTML = `
+      <div class="field"><label>Full name</label><input id="a_name" placeholder="Your name"></div>
+      <div class="field"><label>Mobile number</label><input id="a_mobile" placeholder="10-digit number"></div>
+      <div class="field"><label>Email</label><input id="a_email" placeholder="you@email.com"></div>
+      <div class="field"><label>Password</label><input id="a_password" type="password" placeholder="At least 6 characters"></div>
+      <div id="authErr" class="errline" style="display:none;"></div>
+      <button class="btn btn-primary" id="authSubmit">Create account</button>
+      <div style="text-align:center;font-size:12px;color:var(--ink-soft);margin-top:12px;">Already have an account? <a href="#" id="goLogin" style="color:var(--brand-dark);font-weight:700;">Log in</a></div>
+    `;
+    document.getElementById('authSubmit').addEventListener('click', doSignup);
+    document.getElementById('goLogin').addEventListener('click', (e)=>{ e.preventDefault(); authTab='login'; renderAuthStage(); });
+  }
+}
+
+async function doLogin(){
+  const email = document.getElementById('a_email').value.trim();
+  const password = document.getElementById('a_password').value;
+  const err = document.getElementById('authErr');
+  err.style.display='none';
+  if(!email || !email.includes('@')){ err.style.display='block'; err.textContent="Enter a valid email address."; return; }
+  if(!password){ err.style.display='block'; err.textContent="Enter your password."; return; }
+
+  try{
+    const data = await authFetch("token?grant_type=password", {email, password});
+    session = { access_token: data.access_token, user: data.user };
+    toast("Welcome back!");
+    renderProfileTab();
+  }catch(e){ err.style.display='block'; err.textContent = e.message; }
+}
+
+async function doSignup(){
+  const name = document.getElementById('a_name').value.trim();
+  const mobile = document.getElementById('a_mobile').value.trim();
+  const email = document.getElementById('a_email').value.trim();
+  const password = document.getElementById('a_password').value;
+  const err = document.getElementById('authErr');
+  err.style.display='none';
+  if(!name || !/^\d{10}$/.test(mobile)){ err.style.display='block'; err.textContent="Enter your name and a valid 10-digit mobile number."; return; }
+  if(!email || !email.includes('@')){ err.style.display='block'; err.textContent="Enter a valid email address."; return; }
+  if(!password || password.length < 6){ err.style.display='block'; err.textContent="Password must be at least 6 characters."; return; }
+
+  try{
+    const data = await authFetch("signup", {email, password, data:{}});
+    if(!data.access_token){
+      // Project still has "Confirm email" turned on in Supabase — see note below.
+      err.style.display='block';
+      err.textContent = "Account created, but email confirmation is still required by the backend. Turn off \"Confirm email\" in Supabase Auth settings to skip verification.";
+      return;
+    }
+    session = { access_token: data.access_token, user: data.user };
+    await pgFetch("profiles", {method:"POST", headers:{"Prefer":"resolution=merge-duplicates"}, body: JSON.stringify({id: session.user.id, name, mobile, email})});
+    toast("Account created!");
+    renderProfileTab();
+  }catch(e){ err.style.display='block'; err.textContent = e.message; }
+}
+
+/* ---------------- init ---------------- */
+(async function init(){
+  await loadSiteLogo();
+  await loadCategories();
+  await loadProducts();
+  openSharedProductFromUrl();
+})();
+</script>
+</body>
+</html>
