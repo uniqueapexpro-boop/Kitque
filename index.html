@@ -1070,69 +1070,94 @@ function buildInvoiceHtml(o){
   const unit = Number(o.price || (o.total_price/qty));
   const total = Number(o.total_price || o.price);
   const placed = o.created_at ? fmtDate(o.created_at) : fmtDate(new Date());
+  const expected = o.expected_delivery ? fmtDate(o.expected_delivery) : '—';
+
   return `
-  <div style="width:760px;background:#ffffff;color:#201F19;font-family:'Manrope',sans-serif;padding:56px;box-sizing:border-box;">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1F4B3F;padding-bottom:22px;margin-bottom:30px;">
-      <div>
-        <div style="font-family:'Fraunces',serif;font-size:32px;font-weight:700;color:#122E25;letter-spacing:-.01em;">Kitque</div>
-        <div style="font-size:11px;color:#6B6F5F;letter-spacing:1.5px;text-transform:uppercase;margin-top:5px;font-weight:600;">Everything for home, delivered</div>
+  <div style="width:794px;background:#FBFAF5;color:#201F19;font-family:'Manrope',sans-serif;-webkit-font-smoothing:antialiased;">
+
+    <!-- letterhead band -->
+    <div style="background:linear-gradient(120deg,#1F4B3F,#163A30);padding:38px 52px;display:flex;justify-content:space-between;align-items:center;">
+      <div style="display:flex;align-items:center;gap:13px;">
+        <div style="width:44px;height:44px;border-radius:11px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.28);display:flex;align-items:center;justify-content:center;font-family:'Fraunces',serif;font-size:21px;font-weight:700;color:#F4EFDD;">K</div>
+        <div>
+          <div style="font-family:'Fraunces',serif;font-size:26px;font-weight:700;color:#FFFFFF;letter-spacing:-.01em;line-height:1;">Kitque</div>
+          <div style="font-size:10px;color:#BFD3C7;letter-spacing:1.6px;text-transform:uppercase;margin-top:5px;font-weight:600;">Everything for home, delivered</div>
+        </div>
       </div>
       <div style="text-align:right;">
-        <div style="font-size:10.5px;color:#6B6F5F;text-transform:uppercase;letter-spacing:1.5px;font-weight:700;">Order Confirmation</div>
-        <div style="font-family:'Fraunces',serif;font-size:23px;font-weight:600;color:#1F4B3F;margin-top:6px;">${escapeHtml(o.order_code)}</div>
-        <div style="font-size:12px;color:#6B6F5F;margin-top:4px;">Placed on ${placed}</div>
+        <div style="font-size:10px;color:#BFD3C7;text-transform:uppercase;letter-spacing:1.8px;font-weight:700;">Order Confirmation</div>
+        <div style="font-family:'Fraunces',serif;font-size:21px;font-weight:600;color:#F4EFDD;letter-spacing:.04em;margin-top:6px;">${escapeHtml(o.order_code)}</div>
       </div>
     </div>
 
-    <div style="background:#E7F0EA;border-radius:12px;padding:16px 22px;margin-bottom:30px;display:flex;justify-content:space-between;align-items:center;">
-      <div style="font-size:14.5px;font-weight:800;color:#122E25;">✓ Confirmed · Cash on Delivery</div>
-      <div style="font-size:12.5px;color:#4a4d40;">Expected delivery&nbsp; <b style="color:#122E25;">${escapeHtml(o.expected_delivery ? fmtDate(o.expected_delivery) : '—')}</b></div>
-    </div>
+    <div style="padding:44px 52px 52px;">
 
-    <div style="display:flex;gap:48px;margin-bottom:30px;">
-      <div style="flex:1;">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:#9A9C8C;font-weight:800;margin-bottom:9px;">Delivering To</div>
-        <div style="font-size:14.5px;font-weight:700;margin-bottom:4px;">${escapeHtml(o.buyer_name)}</div>
-        <div style="font-size:12.5px;color:#4a4d40;line-height:1.65;">${escapeHtml(o.address)}, ${escapeHtml(o.village)}<br>${escapeHtml(o.district)}, ${escapeHtml(o.state)}</div>
-        <div style="font-size:12.5px;color:#4a4d40;margin-top:7px;">${escapeHtml(o.mobile)}${o.email?' · '+escapeHtml(o.email):''}</div>
+      <!-- status strip -->
+      <div style="display:flex;justify-content:space-between;align-items:center;background:#E7F0EA;border:1px solid #D3E4DA;border-radius:12px;padding:15px 22px;margin-bottom:34px;">
+        <div style="display:flex;align-items:center;gap:9px;">
+          <div style="width:22px;height:22px;border-radius:50%;background:#1F4B3F;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;">✓</div>
+          <div style="font-size:13.5px;font-weight:800;color:#122E25;">Confirmed &nbsp;·&nbsp; Cash on Delivery</div>
+        </div>
+        <div style="font-size:12px;color:#4a4d40;">Placed ${placed} &nbsp;·&nbsp; Expected delivery <b style="color:#122E25;">${expected}</b></div>
       </div>
-      <div style="flex:1;">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:#9A9C8C;font-weight:800;margin-bottom:9px;">Payment Method</div>
-        <div style="font-size:14.5px;font-weight:700;">Cash on Delivery</div>
-        <div style="font-size:12.5px;color:#4a4d40;margin-top:5px;">Pay in cash when your order arrives at your door.</div>
+
+      <!-- delivering to / payment -->
+      <div style="display:flex;gap:44px;margin-bottom:34px;">
+        <div style="flex:1;">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:1.6px;color:#9A9C8C;font-weight:800;margin-bottom:10px;">Delivering To</div>
+          <div style="font-size:15px;font-weight:700;margin-bottom:5px;color:#122E25;">${escapeHtml(o.buyer_name)}</div>
+          <div style="font-size:12.5px;color:#4a4d40;line-height:1.7;">${escapeHtml(o.address)}, ${escapeHtml(o.village)}<br>${escapeHtml(o.district)}, ${escapeHtml(o.state)}</div>
+          <div style="font-size:12.5px;color:#4a4d40;margin-top:8px;">📞 ${escapeHtml(o.mobile)}${o.email?' &nbsp;·&nbsp; ✉ '+escapeHtml(o.email):''}</div>
+        </div>
+        <div style="width:1px;background:#E7E4D6;"></div>
+        <div style="flex:1;">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:1.6px;color:#9A9C8C;font-weight:800;margin-bottom:10px;">Payment Method</div>
+          <div style="font-size:15px;font-weight:700;color:#122E25;">Cash on Delivery</div>
+          <div style="font-size:12.5px;color:#4a4d40;margin-top:6px;line-height:1.6;">Please keep the exact amount ready. Pay only after checking your order at the door.</div>
+        </div>
       </div>
-    </div>
 
-    <table style="width:100%;border-collapse:collapse;margin-bottom:6px;">
-      <thead>
-        <tr style="border-bottom:2px solid #201F19;">
-          <th style="text-align:left;padding:0 0 11px;font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:#6B6F5F;font-weight:800;">Item</th>
-          <th style="text-align:center;padding:0 0 11px;font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:#6B6F5F;font-weight:800;">Qty</th>
-          <th style="text-align:right;padding:0 0 11px;font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:#6B6F5F;font-weight:800;">Price</th>
-          <th style="text-align:right;padding:0 0 11px;font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:#6B6F5F;font-weight:800;">Amount</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr style="border-bottom:1px solid #E7E4D6;">
-          <td style="padding:16px 0;font-size:13.5px;font-weight:700;">${escapeHtml(o.product_title)}${o.size?`<div style="font-size:11.5px;font-weight:500;color:#6B6F5F;margin-top:3px;">Size: ${escapeHtml(o.size)}</div>`:''}</td>
-          <td style="padding:16px 0;text-align:center;font-size:13.5px;">${qty}</td>
-          <td style="padding:16px 0;text-align:right;font-size:13.5px;">₹${unit.toLocaleString('en-IN')}</td>
-          <td style="padding:16px 0;text-align:right;font-size:13.5px;font-weight:700;">₹${total.toLocaleString('en-IN')}</td>
-        </tr>
-      </tbody>
-    </table>
+      <!-- item table -->
+      <table style="width:100%;border-collapse:collapse;margin-bottom:4px;">
+        <thead>
+          <tr style="background:#F3F1E8;">
+            <th style="text-align:left;padding:11px 14px;font-size:9.5px;text-transform:uppercase;letter-spacing:1.6px;color:#6B6F5F;font-weight:800;border-radius:8px 0 0 8px;">Item</th>
+            <th style="text-align:center;padding:11px 14px;font-size:9.5px;text-transform:uppercase;letter-spacing:1.6px;color:#6B6F5F;font-weight:800;">Qty</th>
+            <th style="text-align:right;padding:11px 14px;font-size:9.5px;text-transform:uppercase;letter-spacing:1.6px;color:#6B6F5F;font-weight:800;">Price</th>
+            <th style="text-align:right;padding:11px 14px;font-size:9.5px;text-transform:uppercase;letter-spacing:1.6px;color:#6B6F5F;font-weight:800;border-radius:0 8px 8px 0;">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="border-bottom:1px solid #E7E4D6;">
+            <td style="padding:18px 14px;font-size:13.5px;font-weight:700;color:#201F19;">${escapeHtml(o.product_title)}${o.size?`<div style="font-size:11.5px;font-weight:500;color:#6B6F5F;margin-top:3px;">Size: ${escapeHtml(o.size)}</div>`:''}</td>
+            <td style="padding:18px 14px;text-align:center;font-size:13.5px;color:#4a4d40;">${qty}</td>
+            <td style="padding:18px 14px;text-align:right;font-size:13.5px;color:#4a4d40;">₹${unit.toLocaleString('en-IN')}</td>
+            <td style="padding:18px 14px;text-align:right;font-size:13.5px;font-weight:700;color:#201F19;">₹${total.toLocaleString('en-IN')}</td>
+          </tr>
+        </tbody>
+      </table>
 
-    <div style="display:flex;justify-content:flex-end;margin-bottom:40px;">
-      <div style="width:250px;">
-        <div style="display:flex;justify-content:space-between;padding:7px 0;font-size:13px;color:#6B6F5F;"><span>Subtotal</span><span>₹${total.toLocaleString('en-IN')}</span></div>
-        <div style="display:flex;justify-content:space-between;padding:7px 0;font-size:13px;color:#6B6F5F;"><span>Delivery</span><span>Free</span></div>
-        <div style="display:flex;justify-content:space-between;padding:13px 0 0;border-top:2px solid #201F19;margin-top:7px;font-size:17px;font-weight:800;color:#122E25;"><span>Total (COD)</span><span>₹${total.toLocaleString('en-IN')}</span></div>
+      <!-- totals -->
+      <div style="display:flex;justify-content:flex-end;margin:14px 0 38px;">
+        <div style="width:260px;">
+          <div style="display:flex;justify-content:space-between;padding:6px 14px;font-size:12.5px;color:#6B6F5F;"><span>Subtotal</span><span>₹${total.toLocaleString('en-IN')}</span></div>
+          <div style="display:flex;justify-content:space-between;padding:6px 14px;font-size:12.5px;color:#6B6F5F;"><span>Delivery</span><span style="color:#2C6B2C;font-weight:700;">Free</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 14px 0;margin-top:8px;border-top:2px solid #201F19;">
+            <span style="font-size:13px;font-weight:800;color:#122E25;">Total (COD)</span>
+            <span style="font-family:'Fraunces',serif;font-size:21px;font-weight:700;color:#1F4B3F;">₹${total.toLocaleString('en-IN')}</span>
+          </div>
+        </div>
       </div>
-    </div>
 
-    <div style="border-top:1px solid #E7E4D6;padding-top:22px;text-align:center;">
-      <div style="font-family:'Fraunces',serif;font-size:15px;color:#1F4B3F;font-weight:600;margin-bottom:7px;">Thank you for shopping with Kitque</div>
-      <div style="font-size:11px;color:#9A9C8C;letter-spacing:.2px;">Track this order anytime at kitque.vercel.app &nbsp;·&nbsp; Order code ${escapeHtml(o.order_code)}</div>
+      <!-- footer -->
+      <div style="border-top:1px dashed #D8D4C4;padding-top:24px;display:flex;justify-content:space-between;align-items:flex-end;">
+        <div>
+          <div style="font-family:'Fraunces',serif;font-size:15.5px;color:#1F4B3F;font-weight:600;margin-bottom:6px;">Thank you for shopping with Kitque</div>
+          <div style="font-size:11px;color:#9A9C8C;line-height:1.6;">Track this order anytime at kitque.vercel.app<br>Questions about your order? Quote code <b style="color:#6B6F5F;">${escapeHtml(o.order_code)}</b> when you reach out.</div>
+        </div>
+        <div style="text-align:right;font-size:10px;color:#C7C4B4;letter-spacing:.3px;">This is a system-generated<br>order confirmation.</div>
+      </div>
+
     </div>
   </div>`;
 }
@@ -1161,11 +1186,12 @@ function downloadInvoicePDF(o){
   if(!window.html2pdf){ fallbackPrint(); return; }
 
   const opt = {
-    margin: 0,
+    margin: [8, 0, 8, 0],
     filename: `${o.order_code}-kitque-invoice.pdf`,
     image: { type: 'jpeg', quality: 0.98 },
-    html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
-    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    html2canvas: { scale: 2.5, useCORS: true, backgroundColor: '#FBFAF5' },
+    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+    pagebreak: { mode: ['avoid-all'] }
   };
 
   html2pdf().set(opt).from(node).save()
